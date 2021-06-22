@@ -50,7 +50,7 @@ class Detector:
 
     def _open_detections_csv(self):
         if os.path.exists(self.pfm.local_paths['detections_csv']):
-            df = pd.read_csv(self.pfm.local_paths['detections_csv'])
+            return pd.read_csv(self.pfm.local_paths['detections_csv'])
 
         else:
             return pd.DataFrame(columns=['Framefile', 'boxes', 'labels', 'scores']).set_index('Framefile')

@@ -1,5 +1,6 @@
 import csv
 import os, subprocess
+from shapely.geometry import Polygon
 import random
 
 
@@ -51,6 +52,22 @@ def xyminmax_to_xywh(xmin, ymin, xmax, ymax):
 def xywh_to_xyminmax(x, y, w, h):
     """convert box coordinates from (x, y, w , h) form to (xmin, ymin, xmax, ymax) form"""
     return [x, y, x + w, y + h]
+
+def area(row, poly_vps):
+    """calculate the annotation box area
+
+    Args:
+        row: pandas dataframe row containing, at minimum, the box coordinates (in x, y, w, h form) and project id
+        poly_vps (dict): dictionary of video crops as Shapely Polygons, keyed by project id
+
+    Returns:
+        float: annotation area if the box is within the video crop boundaries, else np.nan
+    """
+    x_a, y_a, w_a, h_a = row['Box']
+    poly_ann = Polygon([[x_a, y_a], [x_a + w_a, y_a], [x_a + w_a, y_a + h_a], [x_a, y_a + h_a]])
+    intersection_area = poly_ann.intersection(poly_vps[row['ProjectID']]).area
+    ann_area = poly_ann.area
+    return ann_area if ann_area == intersection_area else np.nan
 
 
 class AverageMeter(object):

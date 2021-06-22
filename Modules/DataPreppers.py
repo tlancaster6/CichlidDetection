@@ -1,7 +1,7 @@
 import os, shutil
 from os.path import join, basename, exists
 from Modules.FileManager import FileManager, ProjectFileManager
-from Modules.Utils import xywh_to_xyminmax
+from Modules.Utils import xywh_to_xyminmax, area
 from shapely.geometry import Polygon
 import numpy as np
 import pandas as pd
@@ -9,38 +9,25 @@ from sklearn.model_selection import train_test_split
 import random
 
 
-def area(row, poly_vps):
-    """calculate the annotation box area
-
-    Args:
-        row: pandas dataframe row containing, at minimum, the box coordinates (in x, y, w, h form) and project id
-        poly_vps (dict): dictionary of video crops as Shapely Polygons, keyed by project id
-
-    Returns:
-        float: annotation area if the box is within the video crop boundaries, else np.nan
-    """
-    x_a, y_a, w_a, h_a = row['Box']
-    poly_ann = Polygon([[x_a, y_a], [x_a + w_a, y_a], [x_a + w_a, y_a + h_a], [x_a, y_a + h_a]])
-    intersection_area = poly_ann.intersection(poly_vps[row['ProjectID']]).area
-    ann_area = poly_ann.area
-    return ann_area if ann_area == intersection_area else np.nan
-
-
-class DataPrepper:
+class TrainDataPrepper:
     """class to handle the required data prep prior to training the model"""
-    def __init__(self):
+    def __init__(self, file_manager = None):
         """initiate a FileManager object, and and empty dictionary to store a ProjectFileManager object for each project"""
-        self.file_manager = FileManager()
-        self.proj_file_managers = {}
+        if file_manager is None:
+            self.file_manager = FileManager(training=True)
+        else:
+            self.file_manager = file_manager
+        self.pfms = {}
 
     def download_all(self):
         """initiate a ProjectFileManager for each unique project. This automatically downloads any missing files"""
-        for pid in self.file_manager.unique_pids:
-            self.proj_file_managers.update({pid: ProjectFileManager(pid, self.file_manager)})
+        for pid in self.file_manager.training_pids:
+            self.pfms.update({pid: ProjectFileManager(pid, self.file_manager)})
+            self.pfms[pid].download_all()
 
     def prep(self):
         """prep the label files, image files, and train-test lists required for training"""
-        if not self.proj_file_managers:
+        if not self.pfms:
             self.download_all()
         good_images = self.prep_labels()
         self.prep_images(good_images)
@@ -64,7 +51,7 @@ class DataPrepper:
         # drop annotation boxes outside the area defined by the video points numpy
         df['Box'] = df['Box'].apply(eval)
         poly_vps = {}
-        for pfm in self.proj_file_managers.values():
+        for pfm in self.pfms.values():
             poly_vps.update({pfm.pid: Polygon([list(row) for row in list(np.load(pfm.local_paths['video_points_numpy']))])})
         df['Area'] = df.apply(lambda row: area(row, poly_vps), axis=1)
         df = df.dropna(subset=['Area'])
@@ -92,8 +79,8 @@ class DataPrepper:
             inject_empties (bool): if True (default), inject empty frames into the test set
         """
         source_paths = []
-        for pid in self.file_manager.unique_pids:
-            proj_image_dir = self.proj_file_managers[pid].local_paths['project_image_dir']
+        for pid in self.file_manager.training_pids:
+            proj_image_dir = self.pfms[pid].local_paths['project_image_dir']
             candidates = os.listdir(proj_image_dir)
             proj_images = [img for img in good_images if img in candidates]
             source_paths.extend([join(proj_image_dir, fname) for fname in proj_images])
@@ -154,8 +141,8 @@ class DataPrepper:
         test_files = sorted(test_files)
 
         source_paths = []
-        for pid in self.file_manager.unique_pids:
-            proj_image_dir = self.proj_file_managers[pid].local_paths['project_image_dir']
+        for pid in self.file_manager.training_pids:
+            proj_image_dir = self.pfms[pid].local_paths['project_image_dir']
             candidates = os.listdir(proj_image_dir)
             proj_images = [img for img in empty_frames if img in candidates]
             source_paths.extend([join(proj_image_dir, fname) for fname in proj_images])
@@ -167,5 +154,18 @@ class DataPrepper:
 
         return test_files
 
+
+class DetectDataPrepper:
+
+    def __init__(self, pids):
+        self.pids = pids if type(pids) is list else list(pids)
+        self.pfms = {pid: ProjectFileManager(pid) for pid in self.pids}
+
+    def download_all(self):
+        for pfm in self.pfms:
+            pfm.download_all()
+
+    def prep(self):
+        pass
 
 
