@@ -80,13 +80,17 @@ class DataSet(object):
 
 class DetectDataSet:
 
-    def __init__(self, transforms, img_files):
+    def __init__(self, transforms, img_files, images=None):
         self.img_files = sorted(img_files)
+        self.images = images
         self.transforms = transforms
 
     def __getitem__(self, idx):
         # read in the image corresponding to idx
-        img = Image.open(self.img_files[idx]).convert("RGB")
+        if self.images is None:
+            img = Image.open(self.img_files[idx]).convert("RGB")
+        else:
+            img = Image.fromarray(self.images[idx]).convert("RGB")
         # add idx to the target dict as 'image_id'
         target = {'image_id': tensor(idx)}
         # apply any necessary transforms to the image and target

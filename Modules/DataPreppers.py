@@ -158,11 +158,11 @@ class TrainDataPrepper:
 class DetectDataPrepper:
 
     def __init__(self, pids):
-        self.pids = pids if type(pids) is list else list(pids)
+        self.pids = pids if type(pids) is list else [pids]
         self.pfms = {pid: ProjectFileManager(pid) for pid in self.pids}
 
     def download_all(self):
-        for pfm in self.pfms:
+        for pid, pfm in self.pfms.items():
             pfm.download_all()
 
     def prep(self):

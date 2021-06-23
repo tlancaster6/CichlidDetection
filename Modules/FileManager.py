@@ -13,7 +13,7 @@ class FileManager:
         self.training = training
         self.local_paths = {}
         self.training_pids = None
-        self._initialize()
+        self._initialize_fm()
 
     def sync_training_dir(self, exclude=None, quiet=False):
         """sync the training directory bidirectionally, keeping the newer version of each file.
@@ -43,7 +43,7 @@ class FileManager:
                 regular expressions. Expects a list, even if it's a list of length one. Default None.
             quiet: if True, suppress the output of rclone copy. Default False
         """
-        print('syncing training directory')
+        print('syncing model directory')
         local_model_dir = self.local_paths['model_dir']
         cloud_model_dir = self._local_path_to_cloud_path(local_model_dir)
         down = ['rclone', 'copy', '-u', '-c', cloud_model_dir, local_model_dir]
@@ -54,13 +54,13 @@ class FileManager:
             [com.extend(list(chain.from_iterable(zip(['--exclude'] * len(exclude), exclude)))) for com in [down, up]]
         [run(com) for com in [down, up]]
 
-    def download(self, name, relative_path=None, overwrite=False):
+    def download(self, name, relative_path=None, fault_tolerant=False):
         """use rclone to download a file, untar if it is a .tar file, and update self.local_paths with the path
 
                 Args:
                     name: brief descriptor of the file or directory. Used as the key in the new self.local_paths entry
                     relative_path: path to file or directory, relative to the local_master / cloud_master directory
-                    overwrite: if True, run rclone copy even if a local file with the intended name already exists
+                    fault_tolerant: If True, print a warning (but do not raise an error) if the download fails
 
                 Returns:
                     the full path the to the newly downloaded file or directory
@@ -72,26 +72,27 @@ class FileManager:
                 print('{} was not a valid key for the local_paths dictionary. '
                       'Please provide name and relative path instead'.format(name))
                 return
-
         local_path = join(self.local_paths['master_dir'], relative_path)
         if local_path != self.local_paths[name]:
             print(
                 '{0} is already a key for the local_paths dict, but the relative path provided ({1}) differs from the '
                 'destination path previously defined ({2}). Either omit the relative_path keyword to download {2}, '
-                'or choose a unique name.'.format(name, relative_path, self.local_paths[name]))
+                'or choose a unique name.'.format(name, local_path, self.local_paths[name]))
             return
         cloud_path = join(self.cloud_master_dir, relative_path)
-        if not os.path.exists(local_path) or overwrite:
-            run(['rclone', 'copyto', cloud_path, local_path])
-            assert os.path.exists(local_path), "download failed\nsource: {}\ndestination_dir: {}".format(cloud_path,
-                                                                                                         local_path)
+        run(['rclone', 'copyto', cloud_path, local_path], fault_tolerant=fault_tolerant)
+        if not os.path.exists(local_path):
+            if fault_tolerant:
+                print('download failed for {}. Continuing'.format(name))
+            else:
+                raise Exception('download failed for {}. Exiting'.format(name))
         if os.path.splitext(local_path)[1] == '.tar':
-            if not os.path.exists(os.path.splitext(local_path)[0]) or overwrite:
-                run(['tar', '-xvf', local_path, '-C', os.path.dirname(local_path)])
+            run(['tar', '-xvf', '--skip-old-files', local_path, '-C', os.path.dirname(local_path)],
+                fault_tolerant=fault_tolerant)
             local_path = os.path.splitext(local_path)[0]
             assert os.path.exists(local_path), 'untarring failed for {}'.format(local_path)
+            os.remove(local_path + '.tar')
         self.local_paths.update({name: local_path})
-        os.remove(local_path + '.tar')
         return local_path
 
     def upload(self, name, tarred=False):
@@ -99,9 +100,7 @@ class FileManager:
 
                 Args:
                     name: brief descriptor of the file or directory. must be a key from self.local_paths
-
-                Returns:
-                    the full path the to the newly downloaded file or directory
+                    tarred: if True, and 'name' references a directory, upload the directory as a tarfile
                 """
         try:
             local_path = self.local_paths[name]
@@ -112,6 +111,9 @@ class FileManager:
         cloud_path = self._local_path_to_cloud_path(local_path)
 
         if tarred:
+            # if a tarfile with the same name already exists in the cloud, download and untar it into the target
+            # directory to prevent overwriting pre-existing data
+            self.download(name, fault_tolerant=True)
             output = subprocess.run(
                 ['tar', '-cvf', local_path + '.tar', '-C', local_path, os.path.split(local_path)[0]],
                 capture_output=True, encoding='utf-8')
@@ -119,24 +121,24 @@ class FileManager:
                 print(output.stderr)
                 raise Exception('Error in tarring ' + local_path)
             local_path += '.tar'
-
-        output = subprocess.run(['rclone', 'copyto', local_path, cloud_path], capture_output=True, encoding='utf-8')
+        else:
+            output = subprocess.run(['rclone', 'copyto', local_path, cloud_path], capture_output=True, encoding='utf-8')
         if output.returncode != 0:
             raise Exception('Error in uploading file: ' + output.stderr)
 
-    def _initialize(self):
+    def _initialize_fm(self):
         """create all required local directories and set the paths for files generated later."""
         # locate the cloud master directory
         self.cloud_master_dir = self._locate_cloud_master_dir()
 
         # create basic directory structure and define essential file-paths
-        self._make_dir('master_dir',  join(os.getenv('HOME'), 'Temp', 'CichlidDetection'))
+        self._make_dir('master_dir', join(os.getenv('HOME'), 'Temp', 'CichlidDetection'))
         self._make_dir('analysis_states_dir',
                        join(self.local_paths['master_dir'], '__AnalysisStates', 'CichlidDetection'))
         self._make_dir('data_dir', join(self.local_paths['master_dir'], '__ProjectData'))
         self._make_dir('model_dir',
                        join(self.local_paths['master_dir'], '__MachineLearningModels', 'FishDetectionModels'))
-        self._make_dir('weights_dir', join(self.local_paths['model_dir'], 'weights'))
+        self._make_dir('weights_dir', join(self.local_paths['model_dir'], 'Weights'))
         self.local_paths.update({'weights_file': join(self.local_paths['weights_dir'], 'last.weights')})
 
         # if training, create training-specific directories and file-paths as well
@@ -161,7 +163,6 @@ class FileManager:
         # also sync the training directory and determine the unique project ID's from boxed_fish.csv
         if self.training:
             self.sync_training_dir()
-
 
     def _locate_cloud_master_dir(self):
         """locate the required files in Dropbox.
@@ -194,7 +195,7 @@ class FileManager:
         return cloud_path.replace(self.cloud_master_dir, self.local_paths['master_dir'])
 
     def _full_path_to_relative_path(self, full_path):
-        return full_path.replace(self.cloud_master_dir, '').replace(self.local_paths['master_dir'], '')
+        return full_path.replace(self.cloud_master_dir, '').replace(self.local_paths['master_dir'], '').strip('/')
 
     def _make_dir(self, name, path):
         """update the self.local_paths dict with {name: path}, and create the directory if it does not exist
@@ -224,7 +225,7 @@ class ProjectFileManager(FileManager):
         # initiate the FileManager parent class unless the optional file_manager argument is used
         self.training = training
         if file_manager is None:
-            FileManager.__init__(self, training=training)
+            super().__init__(training=training)
         # if the file_manager argument is used, manually inherit the required attributes
         else:
             self.local_paths = file_manager.local_paths.copy()
@@ -232,22 +233,21 @@ class ProjectFileManager(FileManager):
             self.training = training
         self.pid = pid
         # initialize project-specific directories
-        self._initialize()
+        self._initialize_pfm()
 
-    def download_all(self, image_dir=True, video_dir=False):
+    def download_all(self, image_dir=True, video_dir=True, fault_tolerant=True):
         required_files = ['video_points_numpy', 'video_crop_numpy']
         for fname in required_files:
-            self.download(fname)
+            self.download(fname, fault_tolerant=fault_tolerant)
         if image_dir:
-            self.download('image_dir')
+            self.download('image_dir', fault_tolerant=fault_tolerant)
         if video_dir:
-            self.download('video_dir')
+            self.download('video_dir', fault_tolerant=fault_tolerant)
 
     def update_annotations(self):
         self.download(self.local_paths['boxed_fish_csv'])
 
-
-    def _initialize(self):
+    def _initialize_pfm(self):
         """create project-specific directories and locate project-specific files in the cloud
 
         Overwrites FileManager._initialize() method
@@ -256,14 +256,15 @@ class ProjectFileManager(FileManager):
         self._make_dir('master_analysis_dir', join(self.local_paths['project_dir'], 'MasterAnalysisFiles'))
         self._make_dir('summary_dir', join(self.local_paths['project_dir'], 'Summary'))
         self._make_dir('video_dir', join(self.local_paths['project_dir'], 'Videos'))
-        self.local_paths.update({'video_points_numpy': join(self.local_paths['master_analysis_dir'], 'VideoPoints.npy')})
+        self.local_paths.update(
+            {'video_points_numpy': join(self.local_paths['master_analysis_dir'], 'VideoPoints.npy')})
         self.local_paths.update({'video_crop_numpy': join(self.local_paths['master_analysis_dir'], 'VideoCrop.npy')})
         self.local_paths.update({'detections_csv': join(self.local_paths['master_analysis_dir'], 'Detections.csv')})
-        self.local_paths.update({'labeled_frames_csv': join(self.local_paths['master_analysis_dir'], 'LabeledFrames.csv')})
+        self.local_paths.update(
+            {'labeled_frames_csv': join(self.local_paths['master_analysis_dir'], 'LabeledFrames.csv')})
 
         if self.training:
-            self.local_paths.update({'image_dir':  join(self.local_paths['boxed_images_dir'], '{}.tar'.format(self.pid))})
+            self.local_paths.update(
+                {'image_dir': join(self.local_paths['boxed_images_dir'], '{}.tar'.format(self.pid))})
         else:
             self._make_dir('image_dir', join(self.local_paths['project_dir'], 'Images'))
-
-
