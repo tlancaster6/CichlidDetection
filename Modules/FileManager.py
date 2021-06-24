@@ -126,31 +126,44 @@ class FileManager:
         if output.returncode != 0:
             raise Exception('Error in uploading file: ' + output.stderr)
 
+    def make_dir(self, name, path):
+        """update the self.local_paths dict with {name: path}, and create the directory if it does not exist
+
+        Args:
+            name (str): brief file descriptor, to be used as key in the local_paths dict
+            path (str): local path of the directory to be created
+
+        Returns:
+            str: the path argument, unaltered
+        """
+        self.local_paths.update({name: make_dir(path)})
+        return path
+
     def _initialize_fm(self):
         """create all required local directories and set the paths for files generated later."""
         # locate the cloud master directory
         self.cloud_master_dir = self._locate_cloud_master_dir()
 
         # create basic directory structure and define essential file-paths
-        self._make_dir('master_dir', join(os.getenv('HOME'), 'Temp', 'CichlidDetection'))
-        self._make_dir('analysis_states_dir',
-                       join(self.local_paths['master_dir'], '__AnalysisStates', 'CichlidDetection'))
-        self._make_dir('data_dir', join(self.local_paths['master_dir'], '__ProjectData'))
-        self._make_dir('model_dir',
-                       join(self.local_paths['master_dir'], '__MachineLearningModels', 'FishDetectionModels'))
-        self._make_dir('weights_dir', join(self.local_paths['model_dir'], 'Weights'))
+        self.make_dir('master_dir', join(os.getenv('HOME'), 'Temp', 'CichlidDetection'))
+        self.make_dir('analysis_states_dir',
+                      join(self.local_paths['master_dir'], '__AnalysisStates', 'CichlidDetection'))
+        self.make_dir('data_dir', join(self.local_paths['master_dir'], '__ProjectData'))
+        self.make_dir('model_dir',
+                      join(self.local_paths['master_dir'], '__MachineLearningModels', 'FishDetectionModels'))
+        self.make_dir('weights_dir', join(self.local_paths['model_dir'], 'Weights'))
         self.local_paths.update({'weights_file': join(self.local_paths['weights_dir'], 'last.weights')})
 
         # if training, create training-specific directories and file-paths as well
-        self._make_dir('training_dir', join(self.local_paths['master_dir'], '__TrainingData', 'CichlidDetection'))
-        self._make_dir('train_image_dir', join(self.local_paths['training_dir'], 'train_images'))
-        self._make_dir('test_image_dir', join(self.local_paths['training_dir'], 'test_images'))
-        self._make_dir('label_dir', join(self.local_paths['training_dir'], 'labels'))
-        self._make_dir('log_dir', join(self.local_paths['training_dir'], 'logs'))
-        self._make_dir('predictions_dir', join(self.local_paths['training_dir'], 'predictions'))
-        self._make_dir('training_figure_dir', join(self.local_paths['training_dir'], 'figures'))
-        self._make_dir('training_figure_data_dir', join(self.local_paths['training_figure_dir'], 'figure_data'))
-        self._make_dir('boxed_images_dir', join(self.local_paths['training_dir'], 'BoxedImages'))
+        self.make_dir('training_dir', join(self.local_paths['master_dir'], '__TrainingData', 'CichlidDetection'))
+        self.make_dir('train_image_dir', join(self.local_paths['training_dir'], 'train_images'))
+        self.make_dir('test_image_dir', join(self.local_paths['training_dir'], 'test_images'))
+        self.make_dir('label_dir', join(self.local_paths['training_dir'], 'labels'))
+        self.make_dir('log_dir', join(self.local_paths['training_dir'], 'logs'))
+        self.make_dir('predictions_dir', join(self.local_paths['training_dir'], 'predictions'))
+        self.make_dir('training_figure_dir', join(self.local_paths['training_dir'], 'figures'))
+        self.make_dir('training_figure_data_dir', join(self.local_paths['training_figure_dir'], 'figure_data'))
+        self.make_dir('boxed_images_dir', join(self.local_paths['training_dir'], 'BoxedImages'))
 
         self.local_paths.update({'train_list': join(self.local_paths['training_dir'], 'train_list.txt')})
         self.local_paths.update({'test_list': join(self.local_paths['training_dir'], 'test_list.txt')})
@@ -197,19 +210,6 @@ class FileManager:
     def _full_path_to_relative_path(self, full_path):
         return full_path.replace(self.cloud_master_dir, '').replace(self.local_paths['master_dir'], '').strip('/')
 
-    def _make_dir(self, name, path):
-        """update the self.local_paths dict with {name: path}, and create the directory if it does not exist
-
-        Args:
-            name (str): brief file descriptor, to be used as key in the local_paths dict
-            path (str): local path of the directory to be created
-
-        Returns:
-            str: the path argument, unaltered
-        """
-        self.local_paths.update({name: make_dir(path)})
-        return path
-
 
 class ProjectFileManager(FileManager):
     """Project specific class for managing local and cloud storage, Inherits from FileManager"""
@@ -252,10 +252,11 @@ class ProjectFileManager(FileManager):
 
         Overwrites FileManager._initialize() method
         """
-        self._make_dir('project_dir', join(self.local_paths['data_dir'], self.pid))
-        self._make_dir('master_analysis_dir', join(self.local_paths['project_dir'], 'MasterAnalysisFiles'))
-        self._make_dir('summary_dir', join(self.local_paths['project_dir'], 'Summary'))
-        self._make_dir('video_dir', join(self.local_paths['project_dir'], 'Videos'))
+        self.make_dir('project_dir', join(self.local_paths['data_dir'], self.pid))
+        self.make_dir('master_analysis_dir', join(self.local_paths['project_dir'], 'MasterAnalysisFiles'))
+        self.make_dir('summary_dir', join(self.local_paths['project_dir'], 'Summary'))
+        self.make_dir('summary_data_dir', join(self.local_paths['summary_dir'], 'data'))
+        self.make_dir('video_dir', join(self.local_paths['project_dir'], 'Videos'))
         self.local_paths.update(
             {'video_points_numpy': join(self.local_paths['master_analysis_dir'], 'VideoPoints.npy')})
         self.local_paths.update({'video_crop_numpy': join(self.local_paths['master_analysis_dir'], 'VideoCrop.npy')})
@@ -267,4 +268,4 @@ class ProjectFileManager(FileManager):
             self.local_paths.update(
                 {'image_dir': join(self.local_paths['boxed_images_dir'], '{}.tar'.format(self.pid))})
         else:
-            self._make_dir('image_dir', join(self.local_paths['project_dir'], 'Images'))
+            self.make_dir('image_dir', join(self.local_paths['project_dir'], 'Images'))

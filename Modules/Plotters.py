@@ -1,4 +1,8 @@
-from Modules.FileManager import FileManager
+import os
+
+import cv2
+
+from Modules.FileManager import FileManager, ProjectFileManager
 from Modules.Utils import xyminmax_to_xywh
 from os.path import join, exists
 import pandas as pd
@@ -13,7 +17,7 @@ from matplotlib.patches import Rectangle
 
 
 def plotter_decorator(plotter_method=None, save=True):
-    """decorator used for automatic set-up and clean-up when making figures with methods from the Plotter class"""
+    """decorator used for automatic set-up and clean-up when making figures with methods from Plotter derived classes"""
     if plotter_method is None:
         return partial(plotter_decorator, save=save)
 
@@ -31,9 +35,9 @@ class Plotter:
 
     def __init__(self):
         self.fm = FileManager()
-        self.fig_dir = self.fm.local_paths['figure_dir']
-        self.fig_data_dir = join(self.fig_dir, 'figure_data')
-        self._load_data()
+        self.training_figure_dir = self.fm.local_paths['training_figure_dir']
+        self.training_figure_data_dir = join(self.training_figure_dir, 'training_figure_data_dir')
+
 
     def save_fig(self, fig: Figure, file_stub: str):
         """save the figure as a pdf and close it
@@ -45,8 +49,15 @@ class Plotter:
             fig (Figure): figure to save
             file_stub (str): name to use for the file. Don't include '.pdf'
         """
-        fig.savefig(join(self.fig_dir, '{}.pdf'.format(file_stub)))
+        fig.savefig(join(self.training_figure_dir, '{}.pdf'.format(file_stub)))
         plt.close('all')
+
+
+class TrainPlotter(Plotter):
+
+    def __init__(self):
+        super().__init__()
+        self._load_data()
 
     def plot_all(self):
         """create pdf's of every plot this class can produce"""
@@ -66,7 +77,7 @@ class Plotter:
         ax = fig.add_subplot(111)
         ax.set(xlabel='epoch', ylabel='total loss', title='Training Loss vs. Epoch')
         sns.lineplot(data=self.train_log.loss_total, ax=ax)
-        self.train_log.loc[:, ['loss_total']].to_csv(join(self.fig_data_dir, 'total_loss_vs_epoch.csv'))
+        self.train_log.loc[:, ['loss_total']].to_csv(join(self.training_figure_data_dir, 'total_loss_vs_epoch.csv'))
 
     @plotter_decorator
     def n_boxes_vs_epoch(self, fig: Figure):
@@ -78,7 +89,7 @@ class Plotter:
         sns.lineplot(data=predicted, ax=ax, label='predicted')
         sns.lineplot(data=actual, ax=ax, label='actual')
         df = pd.DataFrame({'predicted': predicted, 'actual': actual})
-        df.to_csv(join(self.fig_data_dir, 'n_boxes_vs_epoch.csv'))
+        df.to_csv(join(self.training_figure_data_dir, 'n_boxes_vs_epoch.csv'))
 
     @plotter_decorator(save=False)
     def animated_learning(self, fig: Figure):
@@ -112,15 +123,16 @@ class Plotter:
             box_preds = (box_preds + ([[0, 0, 0, 0]] * max_detections))[:5]
             color_lookup = {0: 'None', 1: '#FF1493', 2: '#00BFFF'}
             for j in range(5):
-                boxes[j].set_xy([box_preds[j][0], box_preds[j][1]])
+                boxes[j].set_xy(xy=(box_preds[j][0], box_preds[j][1]))
                 boxes[j].set_width(box_preds[j][2])
                 boxes[j].set_height(box_preds[j][3])
                 boxes[j].set_edgecolor(color_lookup[label_preds[j]])
             return boxes
 
-        anim = FuncAnimation(fig, animate, init_func=init, frames=len(self.epoch_predictions), blit=True, interval=200, repeat=False)
+        anim = FuncAnimation(fig, animate, init_func=init, frames=len(self.epoch_predictions), blit=True, interval=200,
+                             repeat=False)
         ax.imshow(im, zorder=0)
-        anim.save(join(self.fig_dir, 'animated_learning.gif'), writer='imagemagick')
+        anim.save(join(self.training_figure_dir, 'animated_learning.gif'), writer='imagemagick')
         plt.close('all')
 
     @plotter_decorator
@@ -131,7 +143,7 @@ class Plotter:
         ax = fig.add_subplot(111)
         ax.set(xlabel='epoch', ylabel='average iou', title='IOU score vs. Epoch')
         sns.lineplot(data=pd.Series(ious), ax=ax)
-        pd.DataFrame({'iou': ious}).to_csv(join(self.fig_data_dir, 'iou_vs_epoch.csv'))
+        pd.DataFrame({'iou': ious}).to_csv(join(self.training_figure_data_dir, 'iou_vs_epoch.csv'))
 
     @plotter_decorator
     def final_epoch_eval(self, fig: Figure):
@@ -222,8 +234,8 @@ class Plotter:
         df['pred_to_act_map'] = df.apply(lambda x: self._flip_mapping(x.act_to_pred_map, x.n_boxes_predicted), axis=1)
         df['pred_accuracy'] = df.apply(
             lambda x: self._compare_labels(x.labels_actual, x.labels_predicted, x.pred_to_act_map), axis=1)
-        df['avg_accuracy'] = df.pred_accuracy.apply(lambda x: sum(x)/len(x) if len(x) > 0 else 1.0)
-        df.to_csv(join(self.fig_data_dir, 'epoch_{}_eval.csv'.format(epoch)))
+        df['avg_accuracy'] = df.pred_accuracy.apply(lambda x: sum(x) / len(x) if len(x) > 0 else 1.0)
+        df.to_csv(join(self.training_figure_data_dir, 'epoch_{}_eval.csv'.format(epoch)))
 
         summary = pd.Series()
         summary['classification_accuracy'] = np.average(df.avg_accuracy, weights=df.n_boxes_predicted)
@@ -231,7 +243,7 @@ class Plotter:
         summary['n_predictions'] = df.n_boxes_predicted.sum()
         summary['n_annotations'] = df.n_boxes_actual.sum()
         summary['n_frames'] = len(df)
-        summary.to_csv(join(self.fig_data_dir, 'epoch_{}_eval_summary.csv'.format(epoch)))
+        summary.to_csv(join(self.training_figure_data_dir, 'epoch_{}_eval_summary.csv'.format(epoch)))
 
         return df, summary
 
@@ -365,4 +377,50 @@ class Plotter:
             a_area = (a[2] - a[0] + 1) * (a[3] - a[1] + 1)
             b_area = (b[2] - b[0] + 1) * (b[3] - b[1] + 1)
             union = float(a_area + b_area - intersection)
-            return intersection/union
+            return intersection / union
+
+
+class DetectPlotter(Plotter):
+
+    def __init__(self, pfm=None, pid=None):
+        super().__init__()
+        self.pfm = pfm if pfm is not None else ProjectFileManager(pid)
+        self.image_dir = self.pfm.local_paths['image_dir']
+        self.summary_dir = self.pfm.local_paths['summary_dir']
+        self.detections = pd.read_csv(self.pfm.local_paths['detections_csv'], index_col='Framefile')
+
+    def animated_detections(self, video_id, frame_range=None, framerate=None):
+        image_paths = [join(self.image_dir, x) for x in os.listdir(self.image_dir)]
+        image_paths = [x for x in image_paths if '{:04}_vid'.format(video_id) in x]
+        if frame_range is not None:
+            image_paths = [x for x in image_paths if int(x.split('_')[-1].split('.')[0]) >= frame_range[0]]
+            image_paths = [x for x in image_paths if int(x.split('_')[-1].split('.')[0]) <= frame_range[1]]
+        image_paths = sorted(image_paths)
+        image = cv2.imread(image_paths[0])
+        height, width, _ = image.shape
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        framerate = 30 if framerate is None else framerate
+        video_path = join(self.summary_dir, '{:04}_vid_detections.mp4'.format(video_id))
+        video = cv2.VideoWriter(video_path, fourcc, framerate, (width, height))
+        for p in image_paths:
+            image = self.draw_boxes(p)
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            video.write(image)
+        video.release()
+
+    def draw_boxes(self, image_path, max_boxes=5, min_score=0.9):
+        color_lookup = {0: 'None', 1: (255, 20, 147), 2: (0, 191, 255)}
+        image = cv2.imread(image_path)
+        framefile = os.path.basename(image_path)
+        boxes, labels, scores = [eval(self.detections.loc[framefile, x]) for x in ['boxes', 'labels', 'scores']]
+        boxes = [[int(np.round(coord)) for coord in box] for box in boxes]
+        boxes = [x for i, x in enumerate(boxes) if scores[i] >= min_score]
+        labels = [x for i, x in enumerate(labels) if scores[i] >= min_score]
+        scores = [x for x in scores if x >= min_score]
+        if len(boxes) > max_boxes:
+            boxes, labels, scores = [x[:5] for x in [boxes, labels, scores]]
+        for box, label in zip(boxes, labels):
+            cv2.rectangle(image, (box[0], box[1]), (box[2], box[3]), color_lookup[label])
+        return image
+
+

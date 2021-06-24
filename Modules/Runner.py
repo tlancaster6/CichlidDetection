@@ -28,6 +28,7 @@ class Runner:
         self.dp.download_all()
 
     def annotate(self, dry=False):
+        """annotate new data"""
         for pid, pfm in self.pfms.items():
             self.ann = Annotator(pfm)
             if not dry:

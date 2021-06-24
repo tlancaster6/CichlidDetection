@@ -50,15 +50,19 @@ class Detector:
                                 collate_fn=collate_fn)
         self.evaluate(dataloader)
 
-    def vid_detect(self, video_ids=None, sampling_rate=None):
+    def vid_detect(self, video_ids=None, sampling_rate=None, save_images=True, range=None):
         """run detection on an mp4 video
         Args:
             video_ids: list of ints, corresponding to the videos to be analyzed. For example, [1] corresponds to
                     '0001_vid.mp4'. Pass None (default) to analyze all videos in the video_dir
             sampling_rate: int, corresponding to the number of frames per second analyze. Set to None (default) to
                     analyze all frames. This is equivalent to setting sampling_rate equal to the video frame-rate.
+            save_images: if True (default) save each frame as a .jpg file to the images directory
+            range: iterable of two ints, specifying the frame numbers of the first and last frame to be analyzed. in
+                    each video. Set to 'None' (default) to analyze each video in its entirety.
         """
         # find the paths to the videos to analyze and confirm the files exist
+        start = datetime.datetime.now()
         available_videos = os.listdir(self.pfm.local_paths['video_dir'])
         available_videos = [f for f in available_videos if f.endswith('.mp4')]
         if video_ids is None:
@@ -73,33 +77,49 @@ class Detector:
         for path in video_paths:
             cap = cv2.VideoCapture(path)
             fps = cap.get(5)
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
             inc = 1 if sampling_rate is None else int(round(fps/sampling_rate))
-            count = 0
-            det_times = []
-            while cap.isOpened():
+            count = 0 if range is None else range[0]
+            count_max = frame_count if range is None else range[1]
+            n_analyzed = 0
+            fnames = []
+            frames = []
+            while cap.isOpened() and (count <= count_max):
                 ret, frame = cap.read()
                 if ret:
-                    start = datetime.datetime.now()
-                    fname = '_'.join([self.pid, os.path.basename(path).split('.')[0], str(count)]) + '.jpg'
+                    fname = '_'.join([self.pid, os.path.basename(path).split('.')[0], '{:07}'.format(count)]) + '.jpg'
                     fname = os.path.join(self.pfm.local_paths['image_dir'], fname)
-                    cv2.imwrite(fname, frame)
-                    dataset = DetectDataSet(Compose([ToTensor()]), [fname], [frame])
-                    dataloader = DataLoader(dataset, batch_size=5, shuffle=False, num_workers=8, pin_memory=True,
+                    if save_images:
+                        cv2.imwrite(fname, frame)
+                    fnames.append(fname)
+                    frames.append(frame)
+                    if len(frames) == 150:
+                        dataset = DetectDataSet(Compose([ToTensor()]), fnames, frames)
+                        dataloader = DataLoader(dataset, batch_size=5, shuffle=False, num_workers=8, pin_memory=True,
                                             collate_fn=collate_fn)
-                    self.evaluate(dataloader)
+                        self.evaluate(dataloader, save_detections=False)
+                        fnames = []
+                        frames = []
+                        n_analyzed += 150
                     count += inc
                     cap.set(1, count)
-                    det_times.append((datetime.datetime.now() - start).total_seconds())
-                    print(np.mean(det_times))
                 else:
+                    if len(frames) > 0:
+                        dataset = DetectDataSet(Compose([ToTensor()]), fnames, frames)
+                        dataloader = DataLoader(dataset, batch_size=5, shuffle=False, num_workers=8, pin_memory=True,
+                                            collate_fn=collate_fn)
+                        self.evaluate(dataloader, save_detections=False)
+                        n_analyzed += len(frames)
                     cap.release()
                     break
         self.save_detections()
-
+        t_elapsed = (datetime.datetime.now() - start).total_seconds()
+        frames_per_second = n_analyzed / t_elapsed
+        print('detection time = {} seconds = {} frames per second'.format(t_elapsed, frames_per_second))
 
     def _open_detections_csv(self):
         if os.path.exists(self.pfm.local_paths['detections_csv']):
-            return pd.read_csv(self.pfm.local_paths['detections_csv'])
+            return pd.read_csv(self.pfm.local_paths['detections_csv'], index_col='Framefile')
 
         else:
             return pd.DataFrame(columns=['Framefile', 'boxes', 'labels', 'scores']).set_index('Framefile')
@@ -134,9 +154,11 @@ class Detector:
             detect_framefiles.append(dataloader.dataset.img_files[i])
         df['Framefile'] = [os.path.basename(path) for path in detect_framefiles]
         df = df[['Framefile', 'boxes', 'labels', 'scores']].set_index('Framefile')
-        self.detections.append(df)
+        self.detections = self.detections.append(df)
         if save_detections:
             self.save_detections()
 
     def save_detections(self):
+        self.detections = self.detections[~self.detections.index.duplicated()]
+        self.detections.sort_index(inplace=True)
         self.detections.to_csv(self.pfm.local_paths['detections_csv'])
