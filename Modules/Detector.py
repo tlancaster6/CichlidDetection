@@ -50,7 +50,7 @@ class Detector:
                                 collate_fn=collate_fn)
         self.evaluate(dataloader)
 
-    def vid_detect(self, video_ids=None, sampling_rate=None, save_images=True, range=None):
+    def vid_detect(self, video_ids=None, sampling_rate=None, save_images=True, frame_range=None):
         """run detection on an mp4 video
         Args:
             video_ids: list of ints, corresponding to the videos to be analyzed. For example, [1] corresponds to
@@ -58,7 +58,7 @@ class Detector:
             sampling_rate: int, corresponding to the number of frames per second analyze. Set to None (default) to
                     analyze all frames. This is equivalent to setting sampling_rate equal to the video frame-rate.
             save_images: if True (default) save each frame as a .jpg file to the images directory
-            range: iterable of two ints, specifying the frame numbers of the first and last frame to be analyzed. in
+            frame_range: iterable of two ints, specifying the frame numbers of the first and last frame to be analyzed. in
                     each video. Set to 'None' (default) to analyze each video in its entirety.
         """
         # find the paths to the videos to analyze and confirm the files exist
@@ -79,8 +79,8 @@ class Detector:
             fps = cap.get(5)
             frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
             inc = 1 if sampling_rate is None else int(round(fps/sampling_rate))
-            count = 0 if range is None else range[0]
-            count_max = frame_count if range is None else range[1]
+            count = 0 if frame_range is None else frame_range[0]
+            count_max = frame_count if frame_range is None else frame_range[1]
             n_analyzed = 0
             fnames = []
             frames = []

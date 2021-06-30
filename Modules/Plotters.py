@@ -394,7 +394,7 @@ class DetectPlotter(Plotter):
         image_paths = [x for x in image_paths if '{:04}_vid'.format(video_id) in x]
         if frame_range is not None:
             image_paths = [x for x in image_paths if int(x.split('_')[-1].split('.')[0]) >= frame_range[0]]
-            image_paths = [x for x in image_paths if int(x.split('_')[-1].split('.')[0]) <= frame_range[1]]
+            image_paths = [x for x in image_paths if int(x.split('_')[-1].split('.')[0]) < frame_range[1]]
         image_paths = sorted(image_paths)
         image = cv2.imread(image_paths[0])
         height, width, _ = image.shape
